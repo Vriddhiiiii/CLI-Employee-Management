@@ -1,0 +1,80 @@
+const express = require('express');
+const app = express();
+const PORT = 3000;
+
+app.use(express.json());
+
+// --- In-memory seat storage ---
+const TOTAL_SEATS = 10;
+let seats = []; // Each seat: { id, status, lockedBy, lockTimeout }
+
+for (let i = 1; i <= TOTAL_SEATS; i++) {
+  seats.push({ id: i, status: 'available', lockedBy: null, lockTimeout: null });
+}
+
+// --- Helper functions ---
+function lockSeat(seat, userId) {
+  seat.status = 'locked';
+  seat.lockedBy = userId;
+
+  // Automatically release lock after 1 minute
+  seat.lockTimeout = setTimeout(() => {
+    if (seat.status === 'locked') {
+      seat.status = 'available';
+      seat.lockedBy = null;
+      seat.lockTimeout = null;
+      console.log(`Seat ${seat.id} lock expired`);
+    }
+  }, 60 * 1000);
+}
+
+function confirmSeat(seat, userId) {
+  if (seat.lockTimeout) {
+    clearTimeout(seat.lockTimeout);
+  }
+  seat.status = 'booked';
+  seat.lockedBy = userId;
+  seat.lockTimeout = null;
+}
+
+// --- Routes ---
+
+// 1. View all seats
+app.get('/seats', (req, res) => {
+  res.json(seats);
+});
+
+// 2. Lock a seat
+app.post('/seats/:id/lock', (req, res) => {
+  const seatId = parseInt(req.params.id);
+  const { userId } = req.body;
+
+  const seat = seats.find(s => s.id === seatId);
+  if (!seat) return res.status(404).json({ error: 'Seat not found' });
+
+  if (seat.status === 'booked') return res.status(400).json({ error: 'Seat already booked' });
+  if (seat.status === 'locked') return res.status(400).json({ error: `Seat locked by user ${seat.lockedBy}` });
+
+  lockSeat(seat, userId);
+  res.json({ message: `Seat ${seatId} locked for user ${userId}`, seat });
+});
+
+// 3. Confirm a seat booking
+app.post('/seats/:id/confirm', (req, res) => {
+  const seatId = parseInt(req.params.id);
+  const { userId } = req.body;
+
+  const seat = seats.find(s => s.id === seatId);
+  if (!seat) return res.status(404).json({ error: 'Seat not found' });
+
+  if (seat.status !== 'locked') return res.status(400).json({ error: 'Seat not locked' });
+  if (seat.lockedBy !== userId) return res.status(403).json({ error: 'You do not hold the lock for this seat' });
+
+  confirmSeat(seat, userId);
+  res.json({ message: `Seat ${seatId} successfully booked by user ${userId}`, seat });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Ticket booking server running at http://localhost:${PORT}`);
+});
